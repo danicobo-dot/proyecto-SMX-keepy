@@ -1,0 +1,184 @@
+#include <ESP32Servo.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Keypad.h>
+#include "BluetoothSerial.h"
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+// Objeto para el Bluetooth
+BluetoothSerial SerialBT;
+
+Servo miServo;
+
+// -------- PINES ESP32 --------
+int ledVerde = 16;
+int ledRojo   = 17;
+int buzzer    = 18;
+int servoPin = 19;  
+
+// I2C OLED ESP32
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+// Contrasena Teclado Fisica
+String password = "5115";
+String input = "";
+
+// OLED
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// -------- TECLADO --------
+const byte FILAS = 4;
+const byte COLUMNAS = 4;
+
+char teclas[FILAS][COLUMNAS] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+
+byte pinesFilas[FILAS] = {13, 12, 14, 27};
+byte pinesColumnas[COLUMNAS] = {26, 25, 33, 32};
+
+Keypad teclado = Keypad(makeKeymap(teclas), pinesFilas, pinesColumnas, FILAS, COLUMNAS);
+
+char teclaConfirmar = '*';
+
+// -------- FUNCIONES DE CONTROL --------
+
+void mostrarInput() {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 10);
+  display.println("CLAVE:");
+  display.setCursor(0, 40);
+  display.println(input);
+  display.display();
+}
+
+void mostrarTexto(String texto) {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 25);
+  display.println(texto);
+  display.display();
+}
+
+void cerrar() {
+  miServo.attach(servoPin);
+  miServo.write(0);
+  delay(500);
+  miServo.detach();
+
+  digitalWrite(ledVerde, LOW);
+  digitalWrite(ledRojo, LOW);
+  noTone(buzzer);
+}
+
+void abrir() {
+  miServo.attach(servoPin);
+  miServo.write(90);
+  delay(500);
+  miServo.detach();
+
+  digitalWrite(ledVerde, HIGH);
+  digitalWrite(ledRojo, LOW);
+
+  tone(buzzer, 1000);
+  delay(150);
+  noTone(buzzer);
+
+  mostrarTexto("ABIERTO");
+  delay(3000);
+
+  cerrar();
+  mostrarInput();
+}
+
+void error() {
+  digitalWrite(ledRojo, HIGH);
+  digitalWrite(ledVerde, LOW);
+  mostrarTexto("INCORRECTO");
+
+  for (int i = 0; i < 2; i++) {
+    tone(buzzer, 1200);
+    delay(200);
+    noTone(buzzer);
+    delay(200);
+  }
+  delay(1500);
+  digitalWrite(ledRojo, LOW);
+}
+
+// -------- SETUP --------
+void setup() {
+  Serial.begin(115200);
+ 
+  SerialBT.begin("ESP32_Cerradura");
+  Serial.println("Bluetooth listo.");
+
+  pinMode(ledVerde, OUTPUT);
+  pinMode(ledRojo, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Error OLED");
+  }
+ 
+  display.clearDisplay();
+  miServo.setPeriodHertz(50);
+
+  cerrar();
+  mostrarInput();
+}
+
+// -------- LOOP --------
+void loop() {
+ 
+  if (SerialBT.available()) {
+    char datoAPP = SerialBT.read();
+    if (datoAPP == 'A') {
+      abrir();
+    }
+    else if (datoAPP == 'B') {
+      cerrar();
+      input = "";
+      mostrarInput();
+    }
+  }
+
+  char tecla = teclado.getKey();
+
+  if (tecla) {
+    if (tecla == 'D') {
+      if (input.length() > 0) {
+        input.remove(input.length() - 1);
+      }
+      mostrarInput();
+    }
+    else if (tecla == teclaConfirmar) {
+      input.trim();
+      if (input == password) {
+        abrir();
+      } else {
+        error();
+      }
+      input = "";
+      mostrarInput();
+    }
+    else if (tecla >= '0' && tecla <= '9') {
+      if (input.length() < 4) {
+        input += tecla;
+      }
+      mostrarInput();
+    }
+  }
+}
